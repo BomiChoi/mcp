@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Car Quest 2</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a18;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+  user-select: none;
+  overflow: hidden;
+}
+#wrap { display: flex; flex-direction: column; align-items: center; }
+#hud {
+  width: 600px;
+  background: #10102a;
+  border: 2px solid #e94560;
+  border-bottom: none;
+  padding: 8px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.hud-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.hud-label { color: #555; font-size: 8px; letter-spacing: 3px; text-transform: uppercase; }
+.hud-value { color: #e94560; font-size: 17px; font-weight: bold; min-width: 55px; text-align: center; }
+.hud-value.lives { color: #ff7090; font-size: 13px; letter-spacing: 1px; }
+#svg-wrap { position: relative; width: 600px; height: 600px; }
+#game { display: block; border: 2px solid #e94560; box-shadow: 0 0 25px #e9456033; }
+#overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(4,4,20,0.90);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 20;
+}
+.ov-title { font-size: 38px; color: #e94560; margin-bottom: 6px; letter-spacing: 4px; text-shadow: 0 0 30px #e9456088; }
+.ov-sub1  { font-size: 14px; color: #888; margin-bottom: 4px; letter-spacing: 1px; }
+.ov-sub2  { font-size: 11px; color: #444; margin-bottom: 22px; }
+.ov-key   { display: inline-block; background: #1e1e3a; border: 1px solid #444; padding: 2px 7px; border-radius: 3px; color: #aaa; font-size: 10px; margin: 0 2px; }
+.ov-btn   {
+  background: #e94560; color: #fff; border: none; padding: 10px 32px;
+  font-size: 14px; border-radius: 4px; cursor: pointer; font-family: inherit;
+  letter-spacing: 3px; text-transform: uppercase; transition: background 0.15s;
+  box-shadow: 0 0 15px #e9456055;
+}
+.ov-btn:hover { background: #c7304a; }
+#level-banner {
+  width: 600px; text-align: center;
+  font-size: 10px; color: #333;
+  padding: 5px; letter-spacing: 3px; text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <div class="hud-group">
+      <div class="hud-label">Level</div>
+      <div class="hud-value" id="h-level">1 / 5</div>
+    </div>
+    <div class="hud-group">
+      <div class="hud-label">Lives</div>
+      <div class="hud-value lives" id="h-lives">♥ ♥ ♥</div>
+    </div>
+    <div class="hud-group">
+      <div class="hud-label">Time</div>
+      <div class="hud-value" id="h-time">0.0s</div>
+    </div>
+    <div class="hud-group">
+      <div class="hud-label">Best</div>
+      <div class="hud-value" id="h-best">--</div>
+    </div>
+  </div>
+  <div id="svg-wrap">
+    <svg id="game" width="600" height="600" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="f-shadow" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="1" dy="2" stdDeviation="2.5" flood-color="#000" flood-opacity="0.45"/>
+        </filter>
+        <filter id="f-glow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="4" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="f-glow-sm" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="2" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="f-blur">
+          <feGaussianBlur stdDeviation="1.5"/>
+        </filter>
+      </defs>
+      <g id="world">
+        <g id="l-bg"></g>
+        <g id="l-road"></g>
+        <g id="l-marks"></g>
+        <g id="l-obj"></g>
+        <g id="l-car"></g>
+        <g id="l-fx"></g>
+      </g>
+    </svg>
+    <div id="overlay">
+      <div class="ov-title" id="ov-title">CAR QUEST 2</div>
+      <div class="ov-sub1" id="ov-sub1">방향키로 자동차를 조종하세요</div>
+      <div class="ov-sub2" id="ov-sub2">
+        <span class="ov-key">↑</span>
+        <span class="ov-key">↓</span>
+        <span class="ov-key">←</span>
+        <span class="ov-key">→</span>
+        &nbsp;도로 밖 또는 장애물 충돌 금지!
+      </div>
+      <button class="ov-btn" id="ov-btn" onclick="overlayClick()">START</button>
+    </div>
+  </div>
+  <div id="level-banner"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════════════
+const TILE = 20, COLS = 30, ROWS = 30;
+const W = TILE * COLS, H = TILE * ROWS;
+
+const T = { EMPTY:0, ROAD:1, START:2, GOAL:3, OBSTACLE:4 };
+const DIR = { UP:0, RIGHT:1, DOWN:2, LEFT:3 };
+const DX = [0,1,0,-1], DY = [-1,0,1,0];
+const DANGLE = [-90, 0, 90, 180];
+
+const CAR_COLORS = ['#e94560','#3498db','#f39c12','#2ecc71','#9b59b6'];
+
+// ══════════════════════════════════════════════════════
+//  LEVEL DATA
+//  road    = required path segments [[x1,y1],[x2,y2]]
+//  fake    = decoy branch segments (road but leads to obstacle)
+//  obstacles = {col,row} placed at dead-end of fake branches
+// ══════════════════════════════════════════════════════
+const LEVELS = [
+  {
+    name: 'LEVEL 1 — STRAIGHT SHOT',
+    speed: 2.0,
+    start: [1,14], goal: [28,14], initDir: DIR.RIGHT,
+    road: [ [[1,14],[28,14]] ],
+    fake: [], obstacles: []
+  },
+  {
+    name: 'LEVEL 2 — FIRST CORNER',
+    speed: 2.5,
+    start: [1,5], goal: [27,26], initDir: DIR.RIGHT,
+    road: [ [[1,5],[20,5]], [[20,5],[20,26]], [[20,26],[27,26]] ],
+    fake: [ [[20,5],[28,5]] ],
+    obstacles: [{col:28,row:5}]
+  },
+  {
+    name: 'LEVEL 3 — S-CURVE',
+    speed: 3.0,
+    start: [1,3], goal: [28,27], initDir: DIR.RIGHT,
+    road: [ [[1,3],[12,3]], [[12,3],[12,15]], [[12,15],[20,15]], [[20,15],[20,27]], [[20,27],[28,27]] ],
+    fake: [ [[12,1],[12,3]], [[20,9],[20,15]] ],
+    obstacles: [{col:12,row:1},{col:20,row:9}]
+  },
+  {
+    name: 'LEVEL 4 — ZIGZAG',
+    speed: 3.5,
+    start: [1,2], goal: [28,28], initDir: DIR.RIGHT,
+    road: [ [[1,2],[10,2]], [[10,2],[10,14]], [[10,14],[22,14]], [[22,14],[22,22]], [[8,22],[22,22]], [[8,22],[8,28]], [[8,28],[28,28]] ],
+    fake: [ [[10,2],[17,2]], [[22,14],[28,14]], [[22,22],[28,22]] ],
+    obstacles: [{col:17,row:2},{col:28,row:14},{col:28,row:22}]
+  },
+  {
+    name: 'LEVEL 5 — LABYRINTH',
+    speed: 4.0,
+    start: [1,1], goal: [28,28], initDir: DIR.RIGHT,
+    road: [
+      [[1,1],[14,1]], [[14,1],[14,10]],
+      [[4,10],[14,10]], [[4,10],[4,22]],
+      [[4,22],[24,22]], [[24,10],[24,22]],
+      [[24,10],[28,10]], [[28,10],[28,28]]
+    ],
+    fake: [ [[14,1],[21,1]], [[14,10],[14,18]], [[4,22],[4,28]], [[24,22],[24,29]] ],
+    obstacles: [{col:21,row:1},{col:14,row:18},{col:4,row:28},{col:24,row:28}]
+  }
+];
+
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+let gs = 'menu'; // menu | playing | crashing | winning | gameover | allwin
+let levelIdx = 0, lives = 3, timer = 0;
+let bestTimes = new Array(LEVELS.length).fill(null);
+let grid = [], startPos = {col:1,row:1}, goalPos = {col:28,row:14};
+let car = { col:1,row:1, vx:20,vy:280, targetCol:1,targetRow:1, dir:DIR.RIGHT, moving:false, speed:2, color:'#e94560' };
+let heldKeys = new Set(), particles = [];
+let stateTimer = 0, shakeTimer = 0, goalAnim = 0;
+let lastTs = 0, audioCtx = null;
+let grassDeco = [];
+
+// ══════════════════════════════════════════════════════
+//  SVG HELPERS
+// ══════════════════════════════════════════════════════
+const NS = 'http://www.w3.org/2000/svg';
+const $id = id => document.getElementById(id);
+
+function mk(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k,v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+function ap(parentId, el) { $id(parentId).appendChild(el); return el; }
+
+function clear(id) {
+  const e = $id(id);
+  while (e.firstChild) e.removeChild(e.firstChild);
+}
+
+// ══════════════════════════════════════════════════════
+//  AUDIO — Web Audio API synthesis
+// ══════════════════════════════════════════════════════
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function sfx(type) {
+  if (!audioCtx) return;
+  try {
+    const ctx = audioCtx, t = ctx.currentTime;
+    const osc = (freq, type='sine') => {
+      const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq; return o;
+    };
+    const gain = (vol) => { const g = ctx.createGain(); g.gain.value = vol; g.connect(ctx.destination); return g; };
+
+    if (type === 'move') {
+      const o = osc(150 + car.dir * 18, 'square'), g = gain(0.028);
+      o.connect(g); o.start(t); o.stop(t + 0.055);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.055);
+    } else if (type === 'crash') {
+      const o = osc(380, 'sawtooth'), g = gain(0.5);
+      o.connect(g);
+      o.frequency.exponentialRampToValueAtTime(28, t + 0.55);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+      o.start(t); o.stop(t + 0.6);
+    } else if (type === 'win') {
+      [523,659,784,1047].forEach((f,i) => {
+        const o = osc(f), g = gain(0);
+        o.connect(g); o.start(t + i*0.11);
+        o.stop(t + i*0.11 + 0.22);
+        g.gain.setValueAtTime(0.22, t + i*0.11);
+        g.gain.exponentialRampToValueAtTime(0.001, t + i*0.11 + 0.22);
+      });
+    } else if (type === 'gameover') {
+      [440,330,220,110].forEach((f,i) => {
+        const o = osc(f,'sawtooth'), g = gain(0);
+        o.connect(g); o.start(t + i*0.18);
+        o.stop(t + i*0.18 + 0.22);
+        g.gain.setValueAtTime(0.18, t + i*0.18);
+        g.gain.exponentialRampToValueAtTime(0.001, t + i*0.18 + 0.22);
+      });
+    } else if (type === 'levelup') {
+      [392,523,659].forEach((f,i) => {
+        const o = osc(f,'sine'), g = gain(0);
+        o.connect(g); o.start(t + i*0.09);
+        o.stop(t + i*0.09 + 0.15);
+        g.gain.setValueAtTime(0.15, t + i*0.09);
+        g.gain.exponentialRampToValueAtTime(0.001, t + i*0.09 + 0.15);
+      });
+    }
+  } catch(e) {}
+}
+
+// ══════════════════════════════════════════════════════
+//  PARTICLES
+// ══════════════════════════════════════════════════════
+function spawnCrash(px, py) {
+  const cols = ['#ff6b35','#ffd23f','#e8494a','#ff9f1c','#ffffff','#ffcc00'];
+  for (let i = 0; i < 22; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 1.5 + Math.random() * 4.5;
+    particles.push({
+      x:px, y:py, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+      life:1, decay:0.022+Math.random()*0.022,
+      color:cols[Math.floor(Math.random()*cols.length)],
+      size:2.5+Math.random()*4.5, grav:0.09
+    });
+  }
+  // Smoke puffs
+  for (let i = 0; i < 6; i++) {
+    particles.push({
+      x:px+(Math.random()-0.5)*12, y:py+(Math.random()-0.5)*12,
+      vx:(Math.random()-0.5)*1.2, vy:-0.5-Math.random()*1.5,
+      life:0.9, decay:0.014, color:'#888', size:5+Math.random()*6, grav:0
+    });
+  }
+}
+
+function spawnConfetti(cx, cy) {
+  const cols = ['#e94560','#ffd700','#2ecc71','#3498db','#e67e22','#9b59b6','#fff','#ff6b9d'];
+  for (let i = 0; i < 55; i++) {
+    const a = -Math.PI/2 + (Math.random()-0.5)*Math.PI*1.3;
+    const s = 2 + Math.random() * 5.5;
+    particles.push({
+      x:cx+(Math.random()-0.5)*50, y:cy+(Math.random()-0.5)*30,
+      vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+      life:1, decay:0.007+Math.random()*0.01,
+      color:cols[Math.floor(Math.random()*cols.length)],
+      size:3+Math.random()*5.5, grav:0.13
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += p.grav;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i,1);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  GRID BUILDING
+// ══════════════════════════════════════════════════════
+function segmentsToSet(segs) {
+  const s = new Set();
+  segs.forEach(([p1,p2]) => {
+    const [x1,y1]=p1, [x2,y2]=p2;
+    for (let x=Math.min(x1,x2); x<=Math.max(x1,x2); x++)
+      for (let y=Math.min(y1,y2); y<=Math.max(y1,y2); y++)
+        s.add(`${x},${y}`);
+  });
+  return s;
+}
+
+function loadGrid(idx) {
+  const lv = LEVELS[idx];
+  grid = Array.from({length:ROWS}, ()=>new Array(COLS).fill(T.EMPTY));
+
+  segmentsToSet(lv.road).forEach(k => {
+    const [c,r] = k.split(',').map(Number);
+    if (r>=0&&r<ROWS&&c>=0&&c<COLS) grid[r][c] = T.ROAD;
+  });
+  segmentsToSet(lv.fake||[]).forEach(k => {
+    const [c,r] = k.split(',').map(Number);
+    if (r>=0&&r<ROWS&&c>=0&&c<COLS && grid[r][c]===T.EMPTY) grid[r][c] = T.ROAD;
+  });
+  (lv.obstacles||[]).forEach(({col,row}) => {
+    if (row>=0&&row<ROWS&&col>=0&&col<COLS) grid[row][col] = T.OBSTACLE;
+  });
+  const [sc,sr] = lv.start, [gc,gr] = lv.goal;
+  grid[sr][sc] = T.START;
+  grid[gr][gc] = T.GOAL;
+  startPos = {col:sc,row:sr};
+  goalPos  = {col:gc,row:gr};
+}
+
+function tileAt(c,r) {
+  if (c<0||c>=COLS||r<0||r>=ROWS) return T.EMPTY;
+  return grid[r][c];
+}
+
+// ══════════════════════════════════════════════════════
+//  STATIC RENDERING (once per level load)
+// ══════════════════════════════════════════════════════
+function genGrassDeco(seed) {
+  grassDeco = [];
+  let s = seed * 13 + 7;
+  const rng = () => { s = (s*9301+49297)%233280; return s/233280; };
+  for (let i = 0; i < 140; i++) {
+    const c = Math.floor(rng()*COLS), r = Math.floor(rng()*ROWS);
+    grassDeco.push({c,r, ox:rng()*TILE, oy:rng()*TILE, r2:2+rng()*5, dark:rng()<0.4});
+  }
+}
+
+function renderBg() {
+  clear('l-bg');
+  ap('l-bg', mk('rect',{x:0,y:0,width:W,height:H,fill:'#2c6122'}));
+  // Subtle lighter strip texture
+  for (let r = 0; r < ROWS; r += 2)
+    ap('l-bg', mk('rect',{x:0,y:r*TILE,width:W,height:TILE,fill:'#2e6724',opacity:0.5}));
+  // Grass decoration dots (only on grass tiles)
+  grassDeco.forEach(({c,r,ox,oy,r2,dark}) => {
+    if (tileAt(c,r) !== T.EMPTY) return;
+    ap('l-bg', mk('circle',{cx:c*TILE+ox,cy:r*TILE+oy,r:r2,fill:dark?'#224a1a':'#3a8030',opacity:0.55}));
+  });
+}
+
+function renderRoad() {
+  clear('l-road'); clear('l-marks');
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = tileAt(c,r);
+      if (t === T.EMPTY) continue;
+      const x=c*TILE, y=r*TILE;
+
+      // Asphalt base
+      ap('l-road', mk('rect',{x,y,width:TILE,height:TILE,fill:'#3c3c52'}));
+      // Subtle inner bevel
+      ap('l-road', mk('rect',{x:x+1,y:y+1,width:TILE-2,height:TILE-2,fill:'none',stroke:'#2c2c40','stroke-width':1}));
+
+      if      (t === T.START)    renderStartDecal(x,y);
+      else if (t === T.GOAL)     renderGoalDecal(x,y);
+      else if (t === T.OBSTACLE) renderCone(x,y);
+    }
+  }
+  renderLaneLines();
+  renderRoadEdges();
+}
+
+function renderStartDecal(x,y) {
+  ap('l-marks', mk('circle',{cx:x+TILE/2,cy:y+TILE/2,r:7,fill:'#27ae60','filter':'url(#f-glow-sm)'}));
+  const t = document.createElementNS(NS,'text');
+  Object.entries({x:x+TILE/2,y:y+TILE/2+3.5,'text-anchor':'middle',fill:'#fff','font-size':'9','font-weight':'bold','font-family':'Courier New'}).forEach(([k,v])=>t.setAttribute(k,v));
+  t.textContent='S'; $id('l-marks').appendChild(t);
+}
+
+function renderGoalDecal(x,y) {
+  const sz=TILE/4;
+  for(let i=0;i<4;i++) for(let j=0;j<4;j++)
+    ap('l-marks', mk('rect',{x:x+j*sz,y:y+i*sz,width:sz,height:sz,fill:(i+j)%2===0?'#ffffff':'#111111'}));
+}
+
+function renderCone(x,y) {
+  const g = document.createElementNS(NS,'g');
+  // Base plate
+  const base=mk('rect',{x:x+3,y:y+13,width:14,height:5,fill:'#555',rx:1});
+  g.appendChild(base);
+  // Cone body
+  const body=mk('polygon',{points:`${x+10},${y+1} ${x+3},${y+14} ${x+17},${y+14}`,fill:'#ff5500'});
+  g.appendChild(body);
+  // White stripe
+  const stripe=mk('polygon',{points:`${x+8.5},${y+7} ${x+6},${y+12} ${x+14},${y+12} ${x+11.5},${y+7}`,fill:'#fff',opacity:'0.9'});
+  g.appendChild(stripe);
+  // Tip
+  g.appendChild(mk('circle',{cx:x+10,cy:y+2.5,r:2,fill:'#ff8840'}));
+  $id('l-marks').appendChild(g);
+}
+
+function renderLaneLines() {
+  for (let r=0;r<ROWS;r++) {
+    for (let c=0;c<COLS;c++) {
+      const t=tileAt(c,r);
+      if (t===T.EMPTY||t===T.START||t===T.GOAL||t===T.OBSTACLE) continue;
+      const x=c*TILE, y=r*TILE;
+      const L=tileAt(c-1,r)!==T.EMPTY, R=tileAt(c+1,r)!==T.EMPTY;
+      const U=tileAt(c,r-1)!==T.EMPTY, D=tileAt(c,r+1)!==T.EMPTY;
+      const hz=(L||R)&&!(U||D), vt=(U||D)&&!(L||R);
+      if (hz)
+        ap('l-marks', mk('rect',{x:x+3,y:y+9,width:TILE-6,height:2,fill:'#d4b83a',opacity:'0.55'}));
+      else if (vt)
+        ap('l-marks', mk('rect',{x:x+9,y:y+3,width:2,height:TILE-6,fill:'#d4b83a',opacity:'0.55'}));
+      else
+        ap('l-marks', mk('rect',{x:x+8,y:y+8,width:4,height:4,fill:'#d4b83a',opacity:'0.3'}));
+    }
+  }
+}
+
+function renderRoadEdges() {
+  const ew='#9090b0', eo='0.65', sw=1.5;
+  for (let r=0;r<ROWS;r++) {
+    for (let c=0;c<COLS;c++) {
+      if (tileAt(c,r)===T.EMPTY) continue;
+      const x=c*TILE, y=r*TILE;
+      if (tileAt(c-1,r)===T.EMPTY) ap('l-marks',mk('line',{x1:x,y1:y,x2:x,y2:y+TILE,stroke:ew,'stroke-width':sw,opacity:eo}));
+      if (tileAt(c+1,r)===T.EMPTY) ap('l-marks',mk('line',{x1:x+TILE,y1:y,x2:x+TILE,y2:y+TILE,stroke:ew,'stroke-width':sw,opacity:eo}));
+      if (tileAt(c,r-1)===T.EMPTY) ap('l-marks',mk('line',{x1:x,y1:y,x2:x+TILE,y2:y,stroke:ew,'stroke-width':sw,opacity:eo}));
+      if (tileAt(c,r+1)===T.EMPTY) ap('l-marks',mk('line',{x1:x,y1:y+TILE,x2:x+TILE,y2:y+TILE,stroke:ew,'stroke-width':sw,opacity:eo}));
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  DYNAMIC RENDERING (every frame)
+// ══════════════════════════════════════════════════════
+function renderCar() {
+  clear('l-car');
+  const x=car.vx, y=car.vy;
+  const cx=x+TILE/2, cy=y+TILE/2;
+  const g = document.createElementNS(NS,'g');
+  g.setAttribute('transform', `rotate(${DANGLE[car.dir]},${cx},${cy})`);
+
+  // Drop shadow (offset ellipse)
+  g.appendChild(mk('ellipse',{cx:cx+2,cy:cy+3,rx:8.5,ry:8.5,fill:'#000',opacity:'0.22'}));
+
+  // === Body ===
+  g.appendChild(mk('rect',{x:x+2,y:y+2,width:16,height:16,fill:car.color,rx:3,'filter':'url(#f-shadow)'}));
+
+  // Highlight gloss on body
+  g.appendChild(mk('rect',{x:x+3,y:y+3,width:9,height:6,fill:'#fff',opacity:'0.14',rx:2}));
+
+  // Roof panel
+  g.appendChild(mk('rect',{x:x+5,y:y+4,width:10,height:12,fill:'#1c2e44',rx:2}));
+
+  // === Windows ===
+  // Windshield (front = right side by default)
+  g.appendChild(mk('rect',{x:x+13.5,y:y+5,width:3.5,height:10,fill:'#92d3f0',rx:1,opacity:'0.92'}));
+  // Rear window
+  g.appendChild(mk('rect',{x:x+3,y:y+6,width:2.5,height:8,fill:'#6ab8d8',rx:1,opacity:'0.75'}));
+  // Side windows
+  g.appendChild(mk('rect',{x:x+7,y:y+3,width:6,height:2.5,fill:'#92d3f0',rx:0.8,opacity:'0.65'}));
+  g.appendChild(mk('rect',{x:x+7,y:y+14.5,width:6,height:2.5,fill:'#92d3f0',rx:0.8,opacity:'0.65'}));
+
+  // === Wheels ===
+  // Front (right side)
+  [[x+15,y+1],[x+15,y+13]].forEach(([wx,wy])=>{
+    g.appendChild(mk('rect',{x:wx,y:wy,width:4,height:6,fill:'#181818',rx:1.2}));
+    g.appendChild(mk('circle',{cx:wx+2,cy:wy+3,r:1.6,fill:'#5a5a5a'}));
+    g.appendChild(mk('circle',{cx:wx+2,cy:wy+3,r:0.7,fill:'#888'}));
+  });
+  // Rear (left side)
+  [[x+1,y+1],[x+1,y+13]].forEach(([wx,wy])=>{
+    g.appendChild(mk('rect',{x:wx,y:wy,width:4,height:6,fill:'#181818',rx:1.2}));
+    g.appendChild(mk('circle',{cx:wx+2,cy:wy+3,r:1.6,fill:'#5a5a5a'}));
+    g.appendChild(mk('circle',{cx:wx+2,cy:wy+3,r:0.7,fill:'#888'}));
+  });
+
+  // === Lights ===
+  // Headlights (front)
+  [[x+18,y+4.5],[x+18,y+14.5]].forEach(([hx,hy])=>{
+    g.appendChild(mk('circle',{cx:hx,cy:hy,r:2.2,fill:'#ffffcc','filter':'url(#f-glow-sm)'}));
+  });
+  // Taillights (rear)
+  [[x+1.5,y+4],[x+1.5,y+12]].forEach(([tx,ty])=>{
+    g.appendChild(mk('rect',{x:tx,y:ty,width:2.5,height:4,fill:'#ff1a1a',rx:0.5}));
+  });
+
+  ap('l-car', g);
+}
+
+function renderGoalPulse() {
+  const old = document.getElementById('goal-pulse');
+  if (old) old.remove();
+  const px = goalPos.col*TILE+TILE/2, py = goalPos.row*TILE+TILE/2;
+  const r = 6 + 4.5*Math.abs(Math.sin(goalAnim));
+  const op = 0.30 + 0.28*Math.abs(Math.sin(goalAnim));
+  const pulse = mk('circle',{id:'goal-pulse',cx:px,cy:py,r,fill:'#ffd700',opacity:op,'filter':'url(#f-glow)'});
+  $id('l-obj').appendChild(pulse);
+}
+
+function renderParticles() {
+  clear('l-fx');
+  particles.forEach(p => {
+    ap('l-fx', mk('circle',{cx:p.x,cy:p.y, r:Math.max(0.4,p.size*p.life), fill:p.color, opacity:Math.min(1,p.life)}));
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  LEVEL LOAD
+// ══════════════════════════════════════════════════════
+function loadLevel(idx) {
+  const lv = LEVELS[idx];
+  loadGrid(idx);
+  genGrassDeco(idx+1);
+  renderBg();
+  renderRoad();
+  clear('l-obj');
+  // Re-render cones in dedicated layer (l-obj) for z-ordering
+  for (let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++)
+    if (grid[r][c]===T.OBSTACLE) renderCone(c*TILE,r*TILE);
+
+  car.col=lv.start[0]; car.row=lv.start[1];
+  car.targetCol=car.col; car.targetRow=car.row;
+  car.vx=car.col*TILE; car.vy=car.row*TILE;
+  car.dir=lv.initDir; car.moving=false;
+  car.speed=lv.speed; car.color=CAR_COLORS[idx];
+
+  particles=[]; shakeTimer=0; timer=0; goalAnim=0;
+  stateTimer=0;
+
+  $id('h-level').textContent = `${idx+1} / ${LEVELS.length}`;
+  $id('level-banner').textContent = lv.name;
+  updateHUD();
+  renderCar(); renderGoalPulse(); renderParticles();
+}
+
+// ══════════════════════════════════════════════════════
+//  GAME LOGIC
+// ══════════════════════════════════════════════════════
+function updateHUD() {
+  $id('h-lives').textContent = '♥ '.repeat(lives).trim() + ' ♡'.repeat(Math.max(0,3-lives));
+  const b = bestTimes[levelIdx];
+  $id('h-best').textContent = b ? b.toFixed(1)+'s' : '--';
+}
+
+function tryMove() {
+  let dir = null;
+  if      (heldKeys.has('ArrowUp'))    dir = DIR.UP;
+  else if (heldKeys.has('ArrowRight')) dir = DIR.RIGHT;
+  else if (heldKeys.has('ArrowDown'))  dir = DIR.DOWN;
+  else if (heldKeys.has('ArrowLeft'))  dir = DIR.LEFT;
+  if (dir === null) return;
+
+  car.dir = dir;
+  const nc=car.col+DX[dir], nr=car.row+DY[dir];
+
+  if (nc<0||nc>=COLS||nr<0||nr>=ROWS || tileAt(nc,nr)===T.EMPTY) {
+    doCrash(); return;
+  }
+  // Move into obstacle tile (crash triggers on arrival)
+  car.targetCol=nc; car.targetRow=nr; car.moving=true;
+  sfx('move');
+}
+
+function doCrash() {
+  if (gs!=='playing') return;
+  gs='crashing'; stateTimer=1.5;
+  spawnCrash(car.vx+TILE/2, car.vy+TILE/2);
+  shakeTimer=0.6;
+  sfx('crash');
+  lives--;
+  updateHUD();
+}
+
+function doWin() {
+  if (gs!=='playing') return;
+  gs='winning'; stateTimer=2.2;
+  if (!bestTimes[levelIdx]||timer<bestTimes[levelIdx]) bestTimes[levelIdx]=timer;
+  updateHUD();
+  spawnConfetti(car.vx+TILE/2, car.vy+TILE/2);
+  sfx('win');
+}
+
+function respawn() {
+  car.col=startPos.col; car.row=startPos.row;
+  car.targetCol=car.col; car.targetRow=car.row;
+  car.vx=car.col*TILE; car.vy=car.row*TILE;
+  car.dir=LEVELS[levelIdx].initDir; car.moving=false;
+  particles=[]; shakeTimer=0; gs='playing';
+}
+
+// ══════════════════════════════════════════════════════
+//  UPDATE LOOP
+// ══════════════════════════════════════════════════════
+function update(dt) {
+  if (gs==='playing') {
+    timer+=dt;
+    goalAnim+=dt*2.8;
+    $id('h-time').textContent = timer.toFixed(1)+'s';
+
+    if (car.moving) {
+      const tvx=car.targetCol*TILE, tvy=car.targetRow*TILE;
+      const dx=tvx-car.vx, dy=tvy-car.vy;
+      const dist=Math.hypot(dx,dy);
+      if (dist <= car.speed+0.5) {
+        car.vx=tvx; car.vy=tvy;
+        car.col=car.targetCol; car.row=car.targetRow;
+        car.moving=false;
+        const t=tileAt(car.col,car.row);
+        if (t===T.OBSTACLE) { doCrash(); return; }
+        if (t===T.GOAL)     { doWin();   return; }
+        tryMove();
+      } else {
+        car.vx+=(dx/dist)*car.speed;
+        car.vy+=(dy/dist)*car.speed;
+      }
+    } else {
+      tryMove();
+    }
+
+  } else if (gs==='crashing') {
+    stateTimer-=dt;
+    if (stateTimer<=0) {
+      if (lives<=0) {
+        gs='gameover';
+        showOverlay('GAME OVER', `레벨 ${levelIdx+1}에서 실패`, '다시 시작', 'retry');
+        sfx('gameover');
+      } else respawn();
+    }
+
+  } else if (gs==='winning') {
+    stateTimer-=dt;
+    goalAnim+=dt*2.8;
+    if (stateTimer<=0) {
+      if (levelIdx>=LEVELS.length-1) {
+        gs='allwin';
+        const tot=bestTimes.reduce((a,v)=>a+(v||0),0);
+        showOverlay('🏆 ALL CLEAR!', `전 레벨 클리어! 베스트 합계: ${tot.toFixed(1)}s`, '처음부터', 'restart');
+      } else {
+        levelIdx++; sfx('levelup');
+        loadLevel(levelIdx); gs='playing';
+      }
+    }
+  }
+
+  // Screen shake
+  if (shakeTimer>0) {
+    shakeTimer-=dt;
+    const sx=(Math.random()-0.5)*8, sy=(Math.random()-0.5)*8;
+    $id('world').setAttribute('transform',`translate(${sx},${sy})`);
+  } else {
+    $id('world').setAttribute('transform','');
+  }
+
+  updateParticles();
+}
+
+// ══════════════════════════════════════════════════════
+//  RENDER LOOP
+// ══════════════════════════════════════════════════════
+function render() {
+  if (gs==='menu'||gs==='gameover'||gs==='allwin') return;
+  renderGoalPulse();
+  renderCar();
+  renderParticles();
+}
+
+// ══════════════════════════════════════════════════════
+//  GAME LOOP
+// ══════════════════════════════════════════════════════
+function loop(ts) {
+  const dt=Math.min((ts-lastTs)/1000, 0.1);
+  lastTs=ts;
+  update(dt); render();
+  requestAnimationFrame(loop);
+}
+
+// ══════════════════════════════════════════════════════
+//  OVERLAY UI
+// ══════════════════════════════════════════════════════
+function showOverlay(title, sub1, btnText, action) {
+  $id('ov-title').textContent=title;
+  $id('ov-sub1').textContent=sub1;
+  $id('ov-sub2').innerHTML='';
+  $id('ov-btn').textContent=btnText;
+  $id('ov-btn').dataset.action=action;
+  $id('overlay').style.display='flex';
+}
+
+function overlayClick() {
+  initAudio();
+  const action=$id('ov-btn').dataset.action||'start';
+  $id('overlay').style.display='none';
+
+  if (action==='start'||action==='restart') {
+    levelIdx=0; lives=3; bestTimes=new Array(LEVELS.length).fill(null);
+    loadLevel(0); gs='playing';
+  } else if (action==='retry') {
+    lives=3; loadLevel(levelIdx); gs='playing';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  INPUT
+// ══════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  heldKeys.add(e.key);
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  if (e.key==='Enter' && $id('overlay').style.display!=='none') overlayClick();
+  if (e.key==='r'||e.key==='R') if (gs==='playing') { lives=3; loadLevel(levelIdx); gs='playing'; }
+});
+document.addEventListener('keyup', e => heldKeys.delete(e.key));
+
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+$id('ov-btn').dataset.action='start';
+loadLevel(0); // pre-render
+requestAnimationFrame(ts=>{ lastTs=ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>

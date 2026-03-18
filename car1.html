@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Car Racing Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    color: #eee;
+  }
+  h1 { margin-bottom: 10px; font-size: 22px; color: #e94560; letter-spacing: 2px; }
+  #info { margin-bottom: 8px; font-size: 13px; color: #aaa; }
+  #game-container {
+    position: relative;
+    border: 2px solid #e94560;
+    box-shadow: 0 0 20px #e9456055;
+  }
+  #ui {
+    margin-top: 10px;
+    display: flex;
+    gap: 30px;
+    font-size: 14px;
+  }
+  .ui-item { color: #16213e; background: #e94560; padding: 4px 12px; border-radius: 4px; }
+  #message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85);
+    border: 2px solid #e94560;
+    padding: 20px 30px;
+    border-radius: 8px;
+    text-align: center;
+    display: none;
+    z-index: 10;
+  }
+  #message h2 { color: #e94560; margin-bottom: 10px; }
+  #message button {
+    margin-top: 10px;
+    background: #e94560;
+    color: white;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #message button:hover { background: #c73652; }
+</style>
+</head>
+<body>
+<h1>🚗 CAR QUEST</h1>
+<div id="info">방향키로 자동차를 조종해 목적지(🏁)까지 도착하세요!</div>
+<div id="game-container">
+  <svg id="game" width="600" height="600" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="message">
+    <h2 id="msg-title">도착!</h2>
+    <p id="msg-body"></p>
+    <button onclick="restartGame()">다시 시작</button>
+  </div>
+</div>
+<div id="ui">
+  <div class="ui-item">이동: <span id="moves">0</span></div>
+  <div class="ui-item">레벨: <span id="level">1</span></div>
+</div>
+
+<script>
+const TILE = 20;
+const COLS = 30;
+const ROWS = 30;
+const W = TILE * COLS;
+const H = TILE * ROWS;
+
+// Tile types
+const EMPTY = 0;
+const ROAD = 1;
+const WALL = 2;
+const START = 3;
+const GOAL = 4;
+const OBSTACLE = 5;
+
+let grid = [];
+let car = { x: 0, y: 0, dir: 0 }; // dir: 0=up,1=right,2=down,3=left
+let moves = 0;
+let levelNum = 1;
+let gameOver = false;
+
+const svg = document.getElementById('game');
+svg.setAttribute('width', W);
+svg.setAttribute('height', H);
+document.getElementById('game-container').style.width = W + 'px';
+
+// ── Levels ──────────────────────────────────────────────────────
+const LEVELS = [
+  // Level 1: Simple L-shape road
+  {
+    start: [1, 14],
+    goal:  [28, 14],
+    road: generateLevel1(),
+    obstacles: []
+  },
+  // Level 2: S-curve
+  {
+    start: [1, 1],
+    goal:  [28, 28],
+    road: null, // will be generated
+    obstacles: []
+  },
+  // Level 3: Maze-like
+  {
+    start: [1, 1],
+    goal:  [28, 28],
+    road: null,
+    obstacles: []
+  }
+];
+
+function generateLevel1() {
+  // Straight road from left to right in the middle
+  const roads = new Set();
+  for (let x = 0; x <= 29; x++) roads.add(`${x},14`);
+  return roads;
+}
+
+function generateLevel2() {
+  const roads = new Set();
+  // S-curve path
+  for (let x = 1; x <= 14; x++) roads.add(`${x},1`);
+  for (let y = 1; y <= 14; y++) roads.add(`14,${y}`);
+  for (let x = 14; x <= 28; x++) roads.add(`${x},14`);
+  for (let y = 14; y <= 28; y++) roads.add(`28,${y}`);
+  return roads;
+}
+
+function generateLevel3() {
+  const roads = new Set();
+  // Zigzag maze
+  for (let x = 1; x <= 8; x++) roads.add(`${x},2`);
+  for (let y = 2; y <= 10; y++) roads.add(`8,${y}`);
+  for (let x = 8; x <= 22; x++) roads.add(`${x},10`);
+  for (let y = 10; y <= 18; y++) roads.add(`22,${y}`);
+  for (let x = 6; x <= 22; x++) roads.add(`${x},18`);
+  for (let y = 18; y <= 28; y++) roads.add(`6,${y}`);
+  for (let x = 6; x <= 28; x++) roads.add(`${x},28`);
+  return roads;
+}
+
+function loadLevel(num) {
+  gameOver = false;
+  moves = 0;
+  document.getElementById('moves').textContent = 0;
+  document.getElementById('level').textContent = num;
+  document.getElementById('message').style.display = 'none';
+
+  let roadSet;
+  let startPos, goalPos;
+  let obstacles = [];
+
+  if (num === 1) {
+    roadSet = generateLevel1();
+    startPos = [1, 14];
+    goalPos  = [28, 14];
+  } else if (num === 2) {
+    roadSet = generateLevel2();
+    startPos = [1, 1];
+    goalPos  = [28, 28];
+    obstacles = [{x:7, y:1}, {x:14,y:7}, {x:21,y:14}, {x:28,y:21}];
+  } else {
+    roadSet = generateLevel3();
+    startPos = [1, 2];
+    goalPos  = [27, 28];
+    obstacles = [{x:4,y:2},{x:8,y:6},{x:14,y:10},{x:18,y:18},{x:10,y:28}];
+  }
+
+  // Build grid
+  grid = [];
+  for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      grid[r][c] = roadSet.has(`${c},${r}`) ? ROAD : EMPTY;
+    }
+  }
+
+  // Place start/goal
+  grid[startPos[1]][startPos[0]] = START;
+  grid[goalPos[1]][goalPos[0]] = GOAL;
+
+  // Place obstacles
+  obstacles.forEach(o => {
+    if (grid[o.y][o.x] === ROAD) grid[o.y][o.x] = OBSTACLE;
+  });
+
+  // Place car
+  car = { x: startPos[0], y: startPos[1], dir: 1 };
+
+  render();
+}
+
+// ── Rendering ────────────────────────────────────────────────────
+function render() {
+  svg.innerHTML = '';
+
+  // Background
+  const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  bg.setAttribute('width', W); bg.setAttribute('height', H);
+  bg.setAttribute('fill', '#0f3460');
+  svg.appendChild(bg);
+
+  // Draw grid tiles
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = grid[r][c];
+      if (t === EMPTY) continue;
+
+      const x = c * TILE, y = r * TILE;
+      if (t === ROAD || t === START) {
+        drawRoad(x, y);
+      } else if (t === GOAL) {
+        drawGoal(x, y);
+      } else if (t === OBSTACLE) {
+        drawObstacle(x, y);
+      }
+    }
+  }
+
+  // Draw car
+  drawCar(car.x * TILE, car.y * TILE, car.dir);
+
+  // Grid lines (subtle)
+  for (let r = 0; r <= ROWS; r++) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', 0); line.setAttribute('y1', r * TILE);
+    line.setAttribute('x2', W); line.setAttribute('y2', r * TILE);
+    line.setAttribute('stroke', '#ffffff08'); line.setAttribute('stroke-width', 0.5);
+    svg.appendChild(line);
+  }
+  for (let c = 0; c <= COLS; c++) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', c * TILE); line.setAttribute('y1', 0);
+    line.setAttribute('x2', c * TILE); line.setAttribute('y2', H);
+    line.setAttribute('stroke', '#ffffff08'); line.setAttribute('stroke-width', 0.5);
+    svg.appendChild(line);
+  }
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  svg.appendChild(el);
+  return el;
+}
+
+function drawRoad(x, y) {
+  svgEl('rect', { x, y, width: TILE, height: TILE, fill: '#3a3a4a' });
+  // Center dashes
+  svgEl('rect', { x: x + 8, y: y + 8, width: 4, height: 4, fill: '#ffffff22', rx: 1 });
+}
+
+function drawGoal(x, y) {
+  svgEl('rect', { x, y, width: TILE, height: TILE, fill: '#1a1a2e' });
+  // Checkered flag pattern
+  const colors = ['#fff', '#222'];
+  const sz = TILE / 4;
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      svgEl('rect', {
+        x: x + j * sz, y: y + i * sz,
+        width: sz, height: sz,
+        fill: colors[(i + j) % 2]
+      });
+    }
+  }
+  // Flag pole
+  svgEl('rect', { x: x + 9, y: y, width: 2, height: TILE, fill: '#e94560' });
+}
+
+function drawObstacle(x, y) {
+  svgEl('rect', { x, y, width: TILE, height: TILE, fill: '#3a3a4a' });
+  // Rock/barrier SVG
+  svgEl('rect', { x: x+2, y: y+4, width: 16, height: 12, fill: '#c0392b', rx: 3 });
+  svgEl('rect', { x: x+4, y: y+2, width: 12, height: 4, fill: '#e74c3c', rx: 2 });
+  svgEl('line', { x1: x+5, y1: y+8, x2: x+15, y2: y+8, stroke: '#ff6b6b', 'stroke-width': 1.5 });
+  svgEl('line', { x1: x+10, y1: y+5, x2: x+10, y2: y+14, stroke: '#ff6b6b', 'stroke-width': 1.5 });
+}
+
+function drawCar(x, y, dir) {
+  // dir: 0=up,1=right,2=down,3=left
+  const cx = x + TILE / 2;
+  const cy = y + TILE / 2;
+  const angle = dir * 90;
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('transform', `rotate(${angle}, ${cx}, ${cy})`);
+
+  // Car body (pointing up by default)
+  // Body
+  const body = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  body.setAttribute('x', x + 4); body.setAttribute('y', y + 2);
+  body.setAttribute('width', 12); body.setAttribute('height', 16);
+  body.setAttribute('fill', '#e94560'); body.setAttribute('rx', 3);
+  g.appendChild(body);
+
+  // Roof
+  const roof = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  roof.setAttribute('x', x + 6); roof.setAttribute('y', y + 5);
+  roof.setAttribute('width', 8); roof.setAttribute('height', 8);
+  roof.setAttribute('fill', '#87ceeb'); roof.setAttribute('rx', 2);
+  g.appendChild(roof);
+
+  // Front headlights (top = front)
+  const hl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hl.setAttribute('x', x + 4); hl.setAttribute('y', y + 2);
+  hl.setAttribute('width', 4); hl.setAttribute('height', 2);
+  hl.setAttribute('fill', '#ffffaa');
+  g.appendChild(hl);
+
+  const hr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hr.setAttribute('x', x + 12); hr.setAttribute('y', y + 2);
+  hr.setAttribute('width', 4); hr.setAttribute('height', 2);
+  hr.setAttribute('fill', '#ffffaa');
+  g.appendChild(hr);
+
+  // Wheels
+  [
+    [x+2, y+3], [x+14, y+3],
+    [x+2, y+13], [x+14, y+13]
+  ].forEach(([wx, wy]) => {
+    const w = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    w.setAttribute('x', wx); w.setAttribute('y', wy);
+    w.setAttribute('width', 4); w.setAttribute('height', 5);
+    w.setAttribute('fill', '#222'); w.setAttribute('rx', 1);
+    g.appendChild(w);
+  });
+
+  svg.appendChild(g);
+}
+
+// ── Input ────────────────────────────────────────────────────────
+const DIRS = [
+  [0, -1],  // up
+  [1,  0],  // right
+  [0,  1],  // down
+  [-1, 0],  // left
+];
+
+const KEY_DIR = {
+  ArrowUp: 0,
+  ArrowRight: 1,
+  ArrowDown: 2,
+  ArrowLeft: 3
+};
+
+document.addEventListener('keydown', e => {
+  if (gameOver) return;
+  if (!(e.key in KEY_DIR)) return;
+  e.preventDefault();
+
+  const dir = KEY_DIR[e.key];
+  car.dir = dir;
+
+  const [dx, dy] = DIRS[dir];
+  const nx = car.x + dx;
+  const ny = car.y + dy;
+
+  // Bounds check
+  if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) {
+    showMessage('충돌!', '도로를 벗어났습니다. 다시 시작합니다.', false);
+    return;
+  }
+
+  const tile = grid[ny][nx];
+
+  if (tile === EMPTY) {
+    showMessage('충돌!', '도로 밖으로 나갔습니다!', false);
+    return;
+  }
+
+  if (tile === OBSTACLE) {
+    car.x = nx; car.y = ny;
+    moves++;
+    document.getElementById('moves').textContent = moves;
+    render();
+    showMessage('충돌!', '장애물에 부딪혔습니다! 게임 오버.', false);
+    return;
+  }
+
+  car.x = nx;
+  car.y = ny;
+  moves++;
+  document.getElementById('moves').textContent = moves;
+
+  if (tile === GOAL) {
+    render();
+    setTimeout(() => {
+      showMessage('🎉 도착!', `목적지에 도달했습니다!\n총 이동: ${moves}회`, true);
+    }, 100);
+    return;
+  }
+
+  render();
+});
+
+function showMessage(title, body, success) {
+  gameOver = true;
+  const msg = document.getElementById('message');
+  document.getElementById('msg-title').textContent = title;
+  document.getElementById('msg-body').textContent = body;
+  document.getElementById('msg-title').style.color = success ? '#2ecc71' : '#e94560';
+  msg.style.display = 'block';
+}
+
+function restartGame() {
+  loadLevel(levelNum);
+}
+
+// Start
+loadLevel(1);
+</script>
+</body>
+</html>
